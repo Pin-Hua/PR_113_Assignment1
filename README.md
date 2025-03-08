@@ -5,6 +5,17 @@
 
 ## Installation 
 
+Install Python Environment
+```bash
+conda create -n pr python=3.10 -y
+conda activate pr
+```
+
+Install required packages
+```bash
+pip install -r requirements.txt
+```
+
 
 ## Re-production of baseline code
 Download videos from slides and put them into the `videos` directory.
