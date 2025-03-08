@@ -7,6 +7,8 @@
 
 Install Python Environment
 ```bash
+git clone https://github.com/mmlab8021/PR_Assignment1_114.git
+cd PR_Assignment1_114
 conda create -n pr python=3.10 -y
 conda activate pr
 ```
