@@ -108,7 +108,12 @@ class HighlightDetector:
 
         print("Extracting audio features...")
         audio_features = self.extract_audio_features()
-        
+
+        ###########################
+        # More advanced classifer #
+        # are allowed to consider.#
+        ###########################
+
         # weighted sum
         highlight_scores = weights['audio'] * audio_features
         highlight_scores += weights['histogram'] * video_features
@@ -116,7 +121,7 @@ class HighlightDetector:
         return audio_features, video_features, highlight_scores
     
     def plot_highlight_curve(self, audio_features, video_features, highlight_scores, weights, window_size=5):
-        """Plot individual features and the highlight detection curve with smoothing"""
+        """Plot individual features and the highlight detection curve"""
         
         time_axis = np.linspace(0, self.duration, len(highlight_scores))
         
