@@ -1,5 +1,5 @@
 # Assignment 1: Video Summarization
-- Course: Pattern Recognition (114/2) / National Taiwan Normal University
+- Course: Pattern Recognition (113/2) / National Taiwan Normal University
 
 - Advisor: Chia-Hung Yeh
 
