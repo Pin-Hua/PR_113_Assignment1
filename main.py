@@ -294,6 +294,10 @@ class HighlightDetector:
         print(f"Best Recall: {best_recall:.4f}")
 
 def main(args):
+    
+    # For reproduction
+    np.random.seed(42)
+
     video_path = args.video
     detector = HighlightDetector(video_path)
     

@@ -12,7 +12,7 @@ cd PR_113_Assignment1
 
 Install Python Environment
 ```bash
-conda create -n pr python=3.10 -y
+conda create -n pr python=3.8 -y
 conda activate pr
 ```
 
