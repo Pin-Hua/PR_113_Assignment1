@@ -34,6 +34,8 @@ python main.py --video ./videos/video1.mp4 --ground_truth ./labels/video1.json -
 :------ | ------- | --------- | -----:|
 Baseline|  0.212  |   0.203   | 0.222 |
 
+<img src="asset/comparison1.png" alt="Visualization of Prediction vs Ground Truth" width="600">
+
 #### Video 2
 ```bash
 python main.py --video ./videos/video2.mp4 --ground_truth ./labels/video2.json --rms 0.7 --hist 0.3 --save --output output_video2.mp4 --min_
@@ -43,6 +45,8 @@ segment_frames 10
  Method | F-Score | Precision | Recall 
 :------ | ------- | --------- | -----:|
 Baseline|  0.188  |   0.200   | 0.179 |
+
+<img src="asset/comparison2.png" alt="Visualization of Prediction vs Ground Truth" width="600">
 
 #### Video Youtube
 ```bash
