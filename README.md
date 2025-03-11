@@ -37,7 +37,7 @@ python main.py --video ./videos/video2.mp4 --ground_truth ./labels/video2.json
 
 #### Video Youtube
 ```bash
-python main.py --video ./videos/video_youtube.mp4
+python main.py --video ./videos/youtube.mp4
 ```
 
 ## Acknowledgement
