@@ -2,3 +2,5 @@ videos/*.mp4
 *.mp4
 *.pptx
 highlight_analysis.png
+README_.md
+main_.py
