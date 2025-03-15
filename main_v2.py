@@ -49,6 +49,32 @@ class HighlightDetector:
         self.video.set(cv2.CAP_PROP_POS_FRAMES, 0)  # Reset video position
         return np.array(motion_magnitudes)
     
+
+    def generate_summary(self, duration=30):
+        """Generates a summarized video of specified duration."""
+        motion_scores = self.extract_video_features()
+        energy, spectral_contrast = self.extract_audio_features()
+        combined_scores = motion_scores + energy + spectral_contrast
+
+        # Lower the selection threshold to ensure enough frames
+        threshold = np.percentile(combined_scores, 80)  # Reduced from 85 to 80
+
+        # Ensure selection covers full duration by adjusting segment count
+        top_segments = np.argsort(combined_scores)[-int((duration * self.fps)):]
+        top_segments.sort()
+
+        video_clip = mp.VideoFileClip(self.video_path)
+        selected_clips = [video_clip.subclip(max(0, i / self.fps), min(self.duration, (i + 1) / self.fps)) for i in top_segments]
+
+        # Ensure proper concatenation method
+        final_clip = mp.concatenate_videoclips(selected_clips, method="compose")
+
+        output_path = self.video_path.replace(".mp4", f"_summary_{duration}s.mp4")
+        final_clip.write_videofile(output_path, codec="libx264")
+
+        return output_path
+    
+    '''
     def generate_summary(self, duration=30):
         """Generates a summarized video of specified duration."""
         motion_scores = self.extract_video_features()
@@ -65,6 +91,7 @@ class HighlightDetector:
         final_clip.write_videofile(output_path, codec="libx264")
 
         return output_path
+    '''
 
     def evaluate_highlights(self, highlight_mask, gt_path):
         """Evaluate highlight detection against ground truth annotations"""
