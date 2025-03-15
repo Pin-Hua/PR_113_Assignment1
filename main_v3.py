@@ -201,15 +201,16 @@ def visualize_pred_gt(predicted, ground_truth, output_path="comparison.png"):
 
     predicted = np.array(predicted, dtype=int)
 
-    if predicted.ndim == 0:  # If `predicted` is a scalar, convert to 1D array
-        predicted = np.array([predicted])
+    if predicted is None or len(predicted) == 0:
+        raise ValueError("Error: `predicted` is None or empty.")
 
-    if predicted.size == 0:
-        raise ValueError("Error: `predicted` array is empty.")
+    predicted = np.array(predicted, dtype=int)
+
+    pred_transitions = np.diff(np.concatenate([[0], predicted, [0]]))
 
     # pred_transitions = np.diff(np.concatenate([[0], predicted, [0]]))
 
-    pred_transitions = np.diff(np.concatenate([[0], predicted, [0]]))
+    # pred_transitions = np.diff(np.concatenate([[0], predicted, [0]]))
     pred_starts, pred_ends = np.where(pred_transitions == 1)[0], np.where(pred_transitions == -1)[0]
 
     for start, end in zip(gt_starts, gt_ends):
