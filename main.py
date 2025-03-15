@@ -120,7 +120,8 @@ def main(args):
 
     video_path = args.video
     detector = HighlightDetector(video_path)
-    highlight_mask = None
+    # highlight_mask = None
+    highlight_mask = np.zeros(detector.frame_count, dtype=bool)  # Initialize as an empty mask
 
     if args.ground_truth:
         gt_c = detector.evaluate_highlights(highlight_mask, args.ground_truth)
