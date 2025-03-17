@@ -1,307 +1,141 @@
 import cv2
 import numpy as np
-import json
-import argparse
 import librosa
 import librosa.display
-import moviepy.editor as mp
-import os
+import json
 import matplotlib.pyplot as plt
+import argparse
+from sklearn.metrics import precision_recall_fscore_support
 
-class HighlightDetector:
-    def __init__(self, video_path):
-        self.video_path = video_path
-        self.video = cv2.VideoCapture(video_path)
-        self.fps = self.video.get(cv2.CAP_PROP_FPS)
-        self.frame_count = int(self.video.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.duration = self.frame_count / self.fps
-        self.width = int(self.video.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.height = int(self.video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+# Function to extract audio features using RMS energy and spectral contrast
+import subprocess
+import os
 
-    '''
-    def extract_audio_features(self):
-        """Extracts audio features (RMS energy, spectral contrast)."""
-        audio_path = self.video_path.replace(".mp4", ".wav")
-        video_clip = mp.VideoFileClip(self.video_path)
-        video_clip.audio.write_audiofile(audio_path, codec='pcm_s16le')
+def extract_audio_features(video_path):
+    # Extract audio from video using ffmpeg
+    audio_path = "temp_audio.wav"
+    command = f"ffmpeg -i {video_path} -q:a 0 -map a {audio_path} -y"
+    subprocess.run(command, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        y, sr = librosa.load(audio_path, sr=None)
-        energy = librosa.feature.rms(y=y)[0]
-        spectral_contrast = librosa.feature.spectral_contrast(y=y, sr=sr).mean(axis=0)
+    if not os.path.exists(audio_path):
+        print(f"Error: Failed to extract audio from {video_path}")
+        return None, None
 
-        os.remove(audio_path)  # Clean up extracted audio
-        return energy[:self.frame_count], spectral_contrast[:self.frame_count]
-    '''
-    '''
-    def extract_audio_features(self):
-        """Extracts audio features (RMS energy, spectral contrast) and aligns them to video frames."""
-        audio_path = self.video_path.replace(".mp4", ".wav")
-        video_clip = mp.VideoFileClip(self.video_path)
-        video_clip.audio.write_audiofile(audio_path, codec='pcm_s16le')
+    # Process extracted audio
+    y, sr = librosa.load(audio_path, sr=None)
+    rms = librosa.feature.rms(y=y)  # Root Mean Square (RMS) Energy
+    spectral_contrast = librosa.feature.spectral_contrast(y=y, sr=sr)  # Spectral Contrast
 
-        y, sr = librosa.load(audio_path, sr=None)
-        energy = librosa.feature.rms(y=y)[0]
-        spectral_contrast = librosa.feature.spectral_contrast(y=y, sr=sr).mean(axis=0)
+    # Clean up temporary file
+    os.remove(audio_path)
 
-        os.remove(audio_path)  # Clean up extracted audio
-
-        # Ensure energy & spectral contrast match video frame count
-        target_length = self.frame_count
-        energy = np.interp(np.linspace(0, len(energy)-1, target_length), np.arange(len(energy)), energy)
-        spectral_contrast = np.interp(np.linspace(0, len(spectral_contrast)-1, target_length), np.arange(len(spectral_contrast)), spectral_contrast)
-
-        return energy, spectral_contrast
-    '''
-
-    def extract_audio_features(self):
-        """Extracts key audio features (RMS energy, spectral contrast) and aligns them to video frames."""
-        audio_path = self.video_path.replace(".mp4", ".wav")
-        video_clip = mp.VideoFileClip(self.video_path)
-        video_clip.audio.write_audiofile(audio_path, codec='pcm_s16le')
-
-        y, sr = librosa.load(audio_path, sr=None)
-        energy = librosa.feature.rms(y=y)[0]
-        spectral_contrast = librosa.feature.spectral_contrast(y=y, sr=sr).mean(axis=0)
-
-        os.remove(audio_path)  # Clean up extracted audio
-
-        # Ensure energy & spectral contrast match video frame count
-        target_length = self.frame_count - 1  # Match motion_scores length
-        energy = np.interp(np.linspace(0, len(energy)-1, target_length), np.arange(len(energy)), energy)
-        spectral_contrast = np.interp(np.linspace(0, len(spectral_contrast)-1, target_length), np.arange(len(spectral_contrast)), spectral_contrast)
-
-        return energy, spectral_contrast
+    return rms, spectral_contrast
 
 
-    def extract_video_features(self):
-        """Extracts motion-based video features using Optical Flow."""
-        motion_magnitudes = []
-        prev_frame = None
-
-        while True:
-            ret, frame = self.video.read()
-            if not ret:
-                break
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-            if prev_frame is not None:
-                flow = cv2.calcOpticalFlowFarneback(prev_frame, gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)
-                motion_magnitudes.append(np.mean(np.abs(flow)))
-            prev_frame = gray
-
-        self.video.set(cv2.CAP_PROP_POS_FRAMES, 0)  # Reset video position
-        return np.array(motion_magnitudes)
+# Function to extract video features
+def extract_video_features(video_path):
+    cap = cv2.VideoCapture(video_path)
+    features = []
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
-    def generate_summary(self, duration=30):
-        """Generates a summarized video of specified duration."""
-        motion_scores = self.extract_video_features()
-        energy, spectral_contrast = self.extract_audio_features()
-        combined_scores = motion_scores + energy + spectral_contrast
-
-        # Lower the selection threshold to ensure enough frames
-        threshold = np.percentile(combined_scores, 80)  # Reduced from 85 to 80
-
-        # Ensure selection covers full duration by adjusting segment count
-        top_segments = np.argsort(combined_scores)[-int((duration * self.fps)):]
-        top_segments.sort()
-
-        video_clip = mp.VideoFileClip(self.video_path)
-        selected_clips = [video_clip.subclip(max(0, i / self.fps), min(self.duration, (i + 1) / self.fps)) for i in top_segments]
-
-        # Ensure proper concatenation method
-        final_clip = mp.concatenate_videoclips(selected_clips, method="compose")
-
-        output_path = self.video_path.replace(".mp4", f"_summary_{duration}s.mp4")
-        final_clip.write_videofile(output_path, codec="libx264")
-
-        return output_path
+    for i in range(frame_count):
+        ret, frame = cap.read()
+        if not ret:
+            break
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        resized = cv2.resize(gray, (64, 64)).flatten()
+        features.append(resized)
     
-    def evaluate_highlights(self, highlight_mask, gt_path):
-        """Evaluate highlight detection against ground truth annotations"""
-        with open(gt_path, 'r') as f:
-            gt_data = json.load(f)
+    cap.release()
+    return np.array(features)
 
-        if 'user_summary' not in gt_data or not gt_data['user_summary']:
-            raise ValueError("Error: 'user_summary' is missing or empty in JSON file.")
+# Function to evaluate the generated summary
+def evaluate_highlights(predicted_summary, ground_truth_path):
+    with open(ground_truth_path, 'r') as f:
+        ground_truth_data = json.load(f)
+        ground_truth_summary = np.array(ground_truth_data["user_summary"])  # Selecting best annotation
+    
+    if ground_truth_summary.size == 0:
+        print("Error: Ground truth summary is empty.")
+        return 0, 0, 0
+    
+    best_gt_summary = ground_truth_summary.mean(axis=0) >= 0.5
+    
+    if len(best_gt_summary) == 0 or len(predicted_summary) == 0:
+        print(f"Error: Mismatch in summary lengths. GT: {len(best_gt_summary)}, Pred: {len(predicted_summary)}")
+        return 0, 0, 0
+    
+    precision, recall, f1, _ = precision_recall_fscore_support(best_gt_summary, predicted_summary, average='binary')
+    return precision, recall, f1
 
-        user_summary = np.array(gt_data['user_summary'], dtype=np.float32)
-
-        if user_summary.ndim == 2:
-            user_summary = user_summary.mean(axis=0)
-
-        if user_summary.size == 0:
-            raise ValueError("Error: 'user_summary' is empty after processing.")
-
-        print(f"User Summary Shape: {user_summary.shape}, Highlight Mask Shape: {highlight_mask.shape}")
-
-        tp = np.logical_and(highlight_mask, user_summary).sum()
-        fp = np.logical_and(highlight_mask, np.logical_not(user_summary)).sum()
-        fn = np.logical_and(np.logical_not(highlight_mask), user_summary).sum()
-
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-        fscore = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-
-        print(f"Evaluation Results:")
-        print(f"F-score: {fscore:.4f}")
-        print(f"Precision: {precision:.4f}")
-        print(f"Recall: {recall:.4f}")
-
-        return user_summary
-
-
-    '''
-    def evaluate_highlights(self, highlight_mask, gt_path):
-        """Evaluate highlight detection against ground truth annotations"""
-        with open(gt_path, 'r') as f:
-            gt_data = json.load(f)
-
-        if 'user_summary' not in gt_data or not gt_data['user_summary']:
-            raise ValueError("Error: 'user_summary' is missing or empty in JSON file.")
-
-        user_summary = np.array(gt_data['user_summary'], dtype=np.float32)
-
-        if user_summary.ndim == 2:
-            user_summary = user_summary.mean(axis=0)
-
-        print(f"User Summary Shape: {user_summary.shape}, Highlight Mask Shape: {highlight_mask.shape}")
-
-        if not np.any(highlight_mask):
-            print("Warning: No predicted highlights matched the ground truth.")
-
-        tp = np.logical_and(highlight_mask, user_summary).sum()
-        fp = np.logical_and(highlight_mask, np.logical_not(user_summary)).sum()
-        fn = np.logical_and(np.logical_not(highlight_mask), user_summary).sum()
-
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-        fscore = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-
-        print(f"Evaluation Results:")
-        print(f"F-score: {fscore:.4f}")
-        print(f"Precision: {precision:.4f}")
-        print(f"Recall: {recall:.4f}")
-
-        return user_summary
-    '''
-
-    '''
-    def evaluate_highlights(self, highlight_mask, gt_path):
-        """Evaluate highlight detection against ground truth annotations"""
-        with open(gt_path, 'r') as f:
-            gt_data = json.load(f)
-
-        if 'user_summary' not in gt_data:
-            raise ValueError("Error: 'user_summary' key not found in JSON file.")
-
-        user_summary = np.array(gt_data['user_summary'], dtype=np.float32)
-
-        # If multiple users, average their annotations
-        if user_summary.ndim == 2:
-            user_summary = user_summary.mean(axis=0)
-
-        # Ensure length matches the video frame count
-        if user_summary.shape[0] != self.frame_count:
-            raise ValueError(f"Mismatch: Ground truth frames ({user_summary.shape[0]}) != Video frames ({self.frame_count})")
-
-        highlight_mask = np.asarray(highlight_mask, dtype=bool)
-
-        # Check if data is valid before computation
-        if user_summary is None or highlight_mask is None:
-            raise ValueError("Error: Ground truth (gt) or highlight mask is None.")
-
-        tp = np.logical_and(highlight_mask, user_summary).sum()
-        fp = np.logical_and(highlight_mask, np.logical_not(user_summary)).sum()
-        fn = np.logical_and(np.logical_not(highlight_mask), user_summary).sum()
-
-        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
-        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
-        fscore = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
-
-        print(f"Evaluation Results:")
-        print(f"F-score: {fscore:.4f}")
-        print(f"Precision: {precision:.4f}")
-        print(f"Recall: {recall:.4f}")
-
-        return user_summary
-        '''
-
-def visualize_pred_gt(predicted, ground_truth, output_path="comparison.png"):
-   
-    import matplotlib.pyplot as plt
-    import numpy as np
-        
-
-    fig, ax = plt.subplots(figsize=(12, 2))
-        
-    gt_transitions = np.diff(np.concatenate([[0], ground_truth, [0]]))
-    gt_starts = np.where(gt_transitions == 1)[0]
-    gt_ends = np.where(gt_transitions == -1)[0]
-        
-    if predicted is None or not isinstance(predicted, (list, np.ndarray)) or len(predicted) == 0:
-        print("Warning: No valid predicted highlights detected. Check feature extraction and thresholding.")
-        predicted = np.zeros(len(ground_truth))  # Default to no highlights
-
-    predicted = np.array(predicted, dtype=int)
-
-    if predicted.ndim == 0:  # Convert scalar to a 1D array
-        predicted = np.array([predicted])
-
-    pred_transitions = np.diff(np.concatenate([[0], predicted, [0]]))
-
-    # pred_transitions = np.diff(np.concatenate([[0], predicted, [0]]))
-    pred_starts = np.where(pred_transitions == 1)[0]
-    pred_ends = np.where(pred_transitions == -1)[0]
-        
-    for start, end in zip(gt_starts, gt_ends):
-        width = end - start
-        ax.barh(y=1, width=width, left=start, color='green', height=0.4)
-    for start, end in zip(pred_starts, pred_ends):
-        width = end - start
-        ax.barh(y=0, width=width, left=start, color='orange', height=0.4)
-        
-    ax.set_yticks([0, 1])
-    ax.set_yticklabels(['Predictions', 'Ground Truth'])
-    ax.set_xlabel('Frames')
-    ax.set_title('Visual Comparison of video summarization')
-        
-    legend_elements = [
-        plt.Rectangle((0, 0), 1, 1, color='green', label='Ground Truth'),
-        plt.Rectangle((0, 0), 1, 1, color='orange', label='Prediction')
-    ]
-    ax.legend(handles=legend_elements, bbox_to_anchor=(0.3, -0.15), ncol=2)
-        
-    ax.set_xlim(0, len(predicted))
-        
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.25)
-        
-    plt.savefig(output_path)
+# Function to visualize prediction vs ground truth
+def visualize_pred_gt(predicted_summary, ground_truth_path):
+    with open(ground_truth_path, 'r') as f:
+        ground_truth_data = json.load(f)
+        ground_truth_summary = np.array(ground_truth_data["user_summary"]).mean(axis=0) >= 0.5
+    
+    plt.figure(figsize=(10, 4))
+    plt.plot(predicted_summary, label='Predicted Summary', linestyle='--', alpha=0.7)
+    plt.plot(ground_truth_summary, label='Ground Truth', alpha=0.7)
+    plt.legend()
+    plt.xlabel('Frames')
+    plt.ylabel('Importance')
+    plt.title('Comparison of Predicted and Ground Truth Summaries')
     plt.show()
 
-def main(args):
+# Function to generate 30s and 60s video summarization
+def get_summary(video_path, summary_length):
+    cap = cv2.VideoCapture(video_path)
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    summary_frames = int(summary_length * fps)
+    
+    output_path = f"summary_{summary_length}s.mp4"
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))))
+    
+    frame_indices = np.linspace(0, total_frames - 1, summary_frames, dtype=int)
+    for idx in frame_indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        out.write(frame)
+    
+    cap.release()
+    out.release()
+    print(f"Generated summary saved at {output_path}")
 
-    np.random.seed(42)
-
-    video_path = args.video
-    detector = HighlightDetector(args.video)
-    #highlight_mask = np.zeros(detector.frame_count, dtype=bool)  # Initialize as empty mask
-    highlight_mask = None
-    # Generate summaries
-    summary_30s = detector.generate_summary(duration=30)
-    summary_1min = detector.generate_summary(duration=60)
-
-    print(f"Generated Summaries:\n30s: {summary_30s}\n1min: {summary_1min}")
-
+def main():
+    parser = argparse.ArgumentParser(description='Video Summarization and Evaluation')
+    parser.add_argument('--video', type=str, required=True, help='Path to the input video file')
+    parser.add_argument('--ground_truth', type=str, required=False, help='Path to the ground truth JSON file (if available)')
+    parser.add_argument('--summary_30s', action='store_true', help='Generate a 30-second summary')
+    parser.add_argument('--summary_60s', action='store_true', help='Generate a 60-second summary')
+    args = parser.parse_args()
+    
+    # Extract features
+    audio_features = extract_audio_features(args.video)
+    video_features = extract_video_features(args.video)
+    
+    # Simulated summary (random for now, should be generated based on extracted features)
+    predicted_summary = np.random.randint(0, 2, len(video_features))
+    
+    # Evaluate the highlights if ground truth exists
     if args.ground_truth:
-        user_summary = detector.evaluate_highlights(highlight_mask, args.ground_truth)
-        if user_summary is not None:
-            visualize_pred_gt(highlight_mask, user_summary)
-
+        precision, recall, f1 = evaluate_highlights(predicted_summary, args.ground_truth)
+        print(f"Precision: {precision:.2f}, Recall: {recall:.2f}, F1-score: {f1:.2f}")
+        
+        # Visualize predicted summary vs ground truth
+        visualize_pred_gt(predicted_summary, args.ground_truth)
+    else:
+        print("Ground truth not provided. Skipping evaluation and visualization.")
+    
+    # Generate video summaries
+    if args.summary_30s:
+        get_summary(args.video, 30)
+    if args.summary_60s:
+        get_summary(args.video, 60)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--video", required=True, help="Path to input video")
-    parser.add_argument("--ground_truth", type=str, help="Path to ground truth JSON file")
-    args = parser.parse_args()
-    main(args)
+    main()
