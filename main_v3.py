@@ -66,9 +66,12 @@ class HighlightDetector:
         os.remove(audio_path)  # Clean up extracted audio
 
         # Ensure energy & spectral contrast match video frame count
+        # Got error : ValueError: operands could not be broadcast together with shapes (12811,) (12814,)
+        '''
         target_length = self.frame_count - 1  # Match motion_scores length
         energy = np.interp(np.linspace(0, len(energy)-1, target_length), np.arange(len(energy)), energy)
         spectral_contrast = np.interp(np.linspace(0, len(spectral_contrast)-1, target_length), np.arange(len(spectral_contrast)), spectral_contrast)
+        '''
 
         return energy, spectral_contrast
 

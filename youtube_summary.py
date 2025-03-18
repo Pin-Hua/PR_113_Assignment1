@@ -1,70 +1,89 @@
 import cv2
 import numpy as np
+import json
+import argparse
 import moviepy.editor as mp
-import librosa
-import librosa.display
 import os
+import scipy.io.wavfile as wav
 
-def extract_audio_features(video_path):
-    video = mp.VideoFileClip(video_path)
-    audio_path = "temp_audio.wav"
-    video.audio.write_audiofile(audio_path, codec='pcm_s16le')
-    
-    y, sr = librosa.load(audio_path, sr=None)
-    rms_energy = librosa.feature.rms(y=y)  # RMS 能量
-    spectral_contrast = librosa.feature.spectral_contrast(y=y, sr=sr)  # 頻譜對比度
-    
-    os.remove(audio_path)
-    return rms_energy, spectral_contrast
+class HighlightDetector:
+    def __init__(self, video_path):
+        self.video_path = video_path
+        self.video = cv2.VideoCapture(video_path)
+        self.fps = self.video.get(cv2.CAP_PROP_FPS)
+        self.frame_count = int(self.video.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.duration = self.frame_count / self.fps
 
-def extract_video_features(video_path):
-    cap = cv2.VideoCapture(video_path)
-    ret, prev_frame = cap.read()
-    prev_gray = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
-    flow_magnitude = []
-    
-    while cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        flow = cv2.calcOpticalFlowFarneback(prev_gray, gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)
-        magnitude, _ = cv2.cartToPolar(flow[..., 0], flow[..., 1])
-        flow_magnitude.append(np.sum(magnitude))
-        prev_gray = gray
-    
-    cap.release()
-    return flow_magnitude
+    def extract_audio_features(self):
+        """Extracts RMS energy and spectral contrast, ensuring they match video frame count."""
+        audio_path = self.video_path.replace(".mp4", ".wav")
+        video_clip = mp.VideoFileClip(self.video_path)
+        video_clip.audio.write_audiofile(audio_path, codec='pcm_s16le')
 
-def get_summary(video_path, duration=30):
-    video = mp.VideoFileClip(video_path)
-    total_duration = video.duration
-    
-    rms_energy, spectral_contrast = extract_audio_features(video_path)
-    flow_magnitude = extract_video_features(video_path)
-    
-    importance_scores = np.array(flow_magnitude) + np.mean(rms_energy) + np.mean(spectral_contrast)
-    top_indices = np.argsort(importance_scores)[-duration:]
-    top_indices.sort()
-    
-    clips = []
-    frame_rate = total_duration / len(flow_magnitude)
-    
-    for idx in top_indices:
-        start_time = idx * frame_rate
-        end_time = min(start_time + frame_rate, total_duration)
-        clips.append(video.subclip(start_time, end_time))
-    
-    summary = mp.concatenate_videoclips(clips)
-    output_filename = f"summary_{duration}sec.mp4"
-    summary.write_videofile(output_filename, codec='libx264')
-    
-    return output_filename
+        sample_rate, audio_data = wav.read(audio_path)
+        os.remove(audio_path)  # Clean up extracted audio
 
-# 主程式
-video_path = "C:/Users/user/PR_113_Assignment1/videos/youtube.mp4"
-summarized_30s = get_summary(video_path, duration=30)
-summarized_60s = get_summary(video_path, duration=60)
+        if len(audio_data.shape) > 1:
+            audio_data = np.mean(audio_data, axis=1)  # Convert to mono if stereo
 
-print(f"30秒摘要視訊已儲存為: {summarized_30s}")
-print(f"60秒摘要視訊已儲存為: {summarized_60s}")
+        frame_size = sample_rate // int(self.fps)  # Align with video frame rate
+        energy = np.array([np.sqrt(np.mean(audio_data[i:i+frame_size]**2)) for i in range(0, len(audio_data), frame_size)])
+        spectral_variance = np.array([np.var(audio_data[i:i+frame_size]) for i in range(0, len(audio_data), frame_size)])
+
+        # Ensure audio features match the number of video frames
+        energy = np.interp(np.linspace(0, len(energy) - 1, self.frame_count), np.arange(len(energy)), energy)
+        spectral_variance = np.interp(np.linspace(0, len(spectral_variance) - 1, self.frame_count), np.arange(len(spectral_variance)), spectral_variance)
+
+        return energy, spectral_variance
+
+    def extract_video_features(self):
+        """Extracts motion intensity using Optical Flow."""
+        motion_magnitudes = []
+        prev_frame = None
+
+        while True:
+            ret, frame = self.video.read()
+            if not ret:
+                break
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            if prev_frame is not None:
+                flow = cv2.calcOpticalFlowFarneback(prev_frame, gray, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+                motion_magnitudes.append(np.mean(np.abs(flow)))
+            prev_frame = gray
+
+        self.video.set(cv2.CAP_PROP_POS_FRAMES, 0)  # Reset video position
+        return np.array(motion_magnitudes)
+
+    def generate_summary(self, duration=30):
+        """Generates a summarized video of specified duration using motion and audio features."""
+        motion_scores = self.extract_video_features()
+        energy, spectral_contrast = self.extract_audio_features()
+        combined_scores = motion_scores + energy + spectral_contrast
+
+        # Select top frames based on combined scores
+        top_segments = np.argsort(combined_scores)[-int((duration * self.fps)):]
+        top_segments.sort()
+
+        video_clip = mp.VideoFileClip(self.video_path)
+        selected_clips = [video_clip.subclip(max(0, i / self.fps), min(self.duration, (i + 1) / self.fps)) for i in top_segments]
+        final_clip = mp.concatenate_videoclips(selected_clips, method="compose")
+
+        output_path = self.video_path.replace(".mp4", f"_summary_{duration}s.mp4")
+        final_clip.write_videofile(output_path, codec="libx264")
+        return output_path
+
+
+def main(args):
+    detector = HighlightDetector(args.video)
+    summary_30s = detector.generate_summary(duration=30)
+    summary_1min = detector.generate_summary(duration=60)
+
+    print(f"Generated Summaries:\n30s: {summary_30s}\n1min: {summary_1min}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--video", required=True, help="Path to input video")
+    args = parser.parse_args()
+    main(args)
