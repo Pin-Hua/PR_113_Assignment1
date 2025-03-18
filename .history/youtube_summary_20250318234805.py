@@ -5,7 +5,6 @@ import argparse
 import moviepy.editor as mp
 import os
 import scipy.io.wavfile as wav
-import trace
 
 class HighlightDetector:
     def __init__(self, video_path):
