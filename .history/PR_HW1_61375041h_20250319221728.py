@@ -56,13 +56,20 @@ def extract_video_features(video_path, smoothing_window=5):
 
     cap.release()
 
+    # 平滑化光流變化數據
     flow_magnitudes = np.convolve(flow_magnitudes, np.ones(smoothing_window) / smoothing_window, mode='same')
     return np.array(flow_magnitudes)
 
 from scipy.signal import medfilt
 
 def smooth_predictions(predicted_summary, kernel_size=5):
-
+    """
+    使用中值濾波 (Median Filter) 平滑化預測結果，避免零散的預測片段。
+    
+    :param predicted_summary: 預測的 highlight (二進制陣列)
+    :param kernel_size: 濾波器的大小，必須為奇數
+    :return: 平滑後的 highlight 預測結果
+    """
     if kernel_size % 2 == 0:
         kernel_size += 1  # 確保 kernel_size 為奇數
     
@@ -77,6 +84,7 @@ def evaluate_highlights(predicted_summary, ground_truth_path):
     ground_truth_summary = ground_truth_summary[:min_length]
     predicted_summary = predicted_summary[:min_length]
 
+    # 平滑化預測結果，避免過度選取
     predicted_summary = smooth_predictions(predicted_summary)
 
     precision, recall, f1, _ = precision_recall_fscore_support(ground_truth_summary, predicted_summary, average='binary')
